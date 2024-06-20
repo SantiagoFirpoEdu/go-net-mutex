@@ -35,8 +35,8 @@ func main() {
 	id, _ := strconv.Atoi(os.Args[1])
 	addressesAsString := os.Args[2:]
 	addresses := make([]PerfectP2PLink.Address, len(addressesAsString))
-	for i, address : ra {
-
+	for i, address := range addressesAsString {
+		addresses[i] = PerfectP2PLink.Address(address)
 	}
 
 	var distributedMutex = DistributedMutex.NewDistributedMutexModule(addresses, DistributedMutex.AgentId(id), true)
