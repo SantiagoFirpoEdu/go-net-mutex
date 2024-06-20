@@ -23,14 +23,16 @@ import (
 	"strconv"
 )
 
+type Address string
+
 type OutRequest struct {
-	To      string
+	To      Address
 	Message string
 }
 
 type InRequest struct {
-	From    string
-	Message string
+	From    Address
+	Content string
 }
 
 type PerfectP2PLink struct {
@@ -38,16 +40,16 @@ type PerfectP2PLink struct {
 	OutputChannel chan OutRequest
 	ShouldRun     bool
 	isInDebugMode bool
-	Cache         map[string]net.Conn // cache de conexoes - reaproveita conexao com destino ao inves de abrir outra
+	Cache         map[Address]net.Conn // cache de conexoes - reaproveita conexao com destino ao inves de abrir outra
 }
 
-func NewLink(_address string, _dbg bool) *PerfectP2PLink {
+func NewLink(_address Address, _dbg bool) *PerfectP2PLink {
 	p2p := &PerfectP2PLink{
 		OutputChannel: make(chan OutRequest, 1),
 		InputChannel:  make(chan InRequest, 1),
 		ShouldRun:     true,
 		isInDebugMode: _dbg,
-		Cache:         make(map[string]net.Conn)}
+		Cache:         make(map[Address]net.Conn)}
 	p2p.debugLog(" Init PerfectP2PLink!")
 	p2p.Start(_address)
 	return p2p
@@ -59,11 +61,11 @@ func (module *PerfectP2PLink) debugLog(s string) {
 	}
 }
 
-func (module *PerfectP2PLink) Start(address string) {
+func (module *PerfectP2PLink) Start(address Address) {
 
 	// PROCESSO PARA RECEBIMENTO DE MENSAGENS
 	go func() {
-		listen, _ := net.Listen("tcp4", address)
+		listen, _ := net.Listen("tcp4", string(address))
 		for {
 			// aceita repetidamente tentativas novas de conexao
 			conn, err := listen.Accept()
@@ -91,8 +93,8 @@ func (module *PerfectP2PLink) Start(address string) {
 						break
 					}
 					message := InRequest{
-						From:    conn.RemoteAddr().String(),
-						Message: string(bufMsg)}
+						From:    Address(conn.RemoteAddr().String()),
+						Content: string(bufMsg)}
 					// ATE AQUI:  procedimentos para receber message
 					module.InputChannel <- message //               // repassa mensagem para modulo superior
 				}
@@ -117,7 +119,7 @@ func (module *PerfectP2PLink) Send(message OutRequest) {
 	// ja existe uma conexao aberta para aquele destinatario?
 	if connection, ok = module.Cache[message.To]; ok {
 	} else { // se nao existe, abre e guarda na cache
-		connection, err = net.Dial("tcp", message.To)
+		connection, err = net.Dial("tcp", string(message.To))
 		module.debugLog("ok   : conexao iniciada com outro processo")
 		if err != nil {
 			fmt.Println(err)
@@ -138,7 +140,7 @@ func (module *PerfectP2PLink) Send(message OutRequest) {
 	_, err = fmt.Fprintf(connection, message.Message) // escreve a mensagem com o tamanho calculado
 	if err != nil {
 		module.debugLog("erro : " + err.Error() + ". Conexao fechada. 1 tentativa de reabrir:")
-		connection, err = net.Dial("tcp", message.To)
+		connection, err = net.Dial("tcp", string(message.To))
 		if err != nil {
 			module.debugLog("       " + err.Error())
 			return

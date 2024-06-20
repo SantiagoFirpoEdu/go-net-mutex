@@ -22,6 +22,7 @@ package DistributedMutex
 import (
 	"SD/PerfectP2PLink"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -33,16 +34,19 @@ const requestEntry = "requestEntry"
 // ------------------------------------------------------------------------------------
 
 type EState int // enumeracao dos estados possiveis de um processo
+type localTimestamp uint64
+type AgentId uint64
+
 const (
-	noMutualExclusion EState = iota
+	notInMutualExclusion EState = iota
 	wantsMutualExclusion
 	inMutualExclusion
 )
 
-type EDmxRequestType int // enumeracao dos estados possiveis de um processo
+type requestFromApplication int // enumeracao dos estados possiveis de um processo
 
 const (
-	ENTER EDmxRequestType = iota
+	ENTER requestFromApplication = iota
 	EXIT
 )
 
@@ -50,43 +54,43 @@ type allowAccessMessage struct { // mensagem do módulo DIMEX infrmando que pode
 	// mensagem para aplicacao indicando que pode prosseguir
 }
 
-type DistributedMutexModule struct {
-	RequestInputChannel  chan EDmxRequestType    // canal para receber pedidos da aplicacao (REQ e EXIT)
-	AllowAccessChannel   chan allowAccessMessage // canal para informar aplicacao que pode acessar
-	addresses            []string                // endereco de todos, na mesma ordem
-	id                   int                     // identificador do processo - é o indice no array de enderecos acima
-	mutexState           EState                  // estado deste processo na exclusao mutua distribuida
-	isWaitingFlags       []bool                  // processos aguardando tem flag true
-	localLogicalClock    int                     // relogio logico local
-	lastRequestTimestamp int                     // timestamp local da ultima requisicao deste processo
-	responseAmount       int
-	isInDebugMode        bool
+type Module struct {
+	ApplicationRequests      chan requestFromApplication // canal para receber pedidos da aplicacao (REQ e EXIT)
+	AllowApplicationToAccess chan allowAccessMessage     // canal para informar aplicacao que pode acessar
+	addresses                []PerfectP2PLink.Address    // endereco de todos, na mesma ordem
+	addressToId              map[PerfectP2PLink.Address]AgentId
+	id                       AgentId        // identificador do processo - é o indice no array de enderecos acima
+	state                    EState         // estado deste processo na exclusao mutua distribuida
+	isAgentWaiting           []bool         // processos aguardando tem flag true
+	localLogicalClock        localTimestamp // relogio logico local
+	responseOkAmount         uint
+	isInDebugMode            bool
 
-	PerfectP2PLink *PerfectP2PLink.PerfectP2PLink // acesso aa comunicacao enviar por PP2PLinq.RequestInputChannel  e receber por PP2PLinq.AllowAccessChannel
+	PerfectP2PLink *PerfectP2PLink.PerfectP2PLink // acesso aa comunicacao enviar por PP2PLinq.ApplicationRequests  e receber por PP2PLinq.AllowApplicationToAccess
 }
 
 // ------------------------------------------------------------------------------------
 // ------- inicializacao
 // ------------------------------------------------------------------------------------
 
-func NewDistributedMutexModule(addresses []string, id int, isDebug bool) *DistributedMutexModule {
+func NewDistributedMutexModule(addresses []PerfectP2PLink.Address, id AgentId, isDebug bool) *Module {
 
-	distributedMutexModule := &DistributedMutexModule{
-		RequestInputChannel: make(chan EDmxRequestType, 1),
-		AllowAccessChannel:  make(chan allowAccessMessage, 1),
-
-		addresses:            addresses,
-		id:                   id,
-		mutexState:           noMutualExclusion,
-		isWaitingFlags:       make([]bool, len(addresses)),
-		localLogicalClock:    0,
-		lastRequestTimestamp: 0,
-		isInDebugMode:        isDebug,
+	distributedMutexModule := &Module{
+		ApplicationRequests:      make(chan requestFromApplication, 1),
+		AllowApplicationToAccess: make(chan allowAccessMessage, 1),
+		addressToId:              make(map[PerfectP2PLink.Address]AgentId),
+		addresses:                addresses,
+		id:                       id,
+		state:                    notInMutualExclusion,
+		isAgentWaiting:           make([]bool, len(addresses)),
+		localLogicalClock:        0,
+		isInDebugMode:            isDebug,
 
 		PerfectP2PLink: PerfectP2PLink.NewLink(addresses[id], isDebug)}
 
-	for i := 0; i < len(distributedMutexModule.isWaitingFlags); i++ {
-		distributedMutexModule.isWaitingFlags[i] = false
+	for i := AgentId(0); i < AgentId(len(distributedMutexModule.isAgentWaiting)); i++ {
+		distributedMutexModule.isAgentWaiting[i] = false
+		distributedMutexModule.addressToId[addresses[i]] = i
 	}
 
 	distributedMutexModule.Start()
@@ -95,11 +99,11 @@ func NewDistributedMutexModule(addresses []string, id int, isDebug bool) *Distri
 	return distributedMutexModule
 }
 
-func (module *DistributedMutexModule) Start() {
+func (module *Module) Start() {
 	go func() {
 		for {
 			select {
-			case applicationRequest := <-module.RequestInputChannel: // vindo da  aplicação
+			case applicationRequest := <-module.ApplicationRequests: // vindo da  aplicação
 				if applicationRequest == ENTER {
 					module.debugLog("App", module.id, "is requesting mutual exclusion")
 					module.requestEntry()
@@ -110,32 +114,43 @@ func (module *DistributedMutexModule) Start() {
 				}
 
 			case otherMessage := <-module.PerfectP2PLink.InputChannel:
-				if strings.Contains(otherMessage.Message, responseOk) {
-					module.debugLog("         <<<---- Responds! " + otherMessage.Message)
-					module.handleRequestOkFromOther(otherMessage) // ENTRADA DO ALGORITMO
+				otherTimestamp := getTimestamp(otherMessage)
+				if strings.Contains(otherMessage.Content, responseOk) {
+					module.debugLog("         <<<---- Responds! " + otherMessage.Content)
+					module.handleRequestOkFromOther() // ENTRADA DO ALGORITMO
 
-				} else if strings.Contains(otherMessage.Message, requestEntry) {
-					module.debugLog("          <<<---- Requests??  " + otherMessage.Message)
-					module.handleEntryRequestFromAnother(otherMessage) // ENTRADA DO ALGORITMO
+				} else if strings.Contains(otherMessage.Content, requestEntry) {
+					module.debugLog("          <<<---- Requests??  " + otherMessage.Content)
+					module.handleEntryRequestFromAnother(otherMessage.From, otherTimestamp, module.addressToId[otherMessage.From]) // ENTRADA DO ALGORITMO
 				}
 			}
 		}
 	}()
 }
 
-func (module *DistributedMutexModule) requestEntry() {
+func getTimestamp(message PerfectP2PLink.InRequest) localTimestamp {
+	split := strings.Split(message.Content, " ")
+	timestamp := split[1]
+	atoi, err := strconv.Atoi(timestamp)
+	if err != nil {
+		panic("Unable to get localTimestamp from message")
+	}
+
+	return localTimestamp(atoi)
+}
+
+func (module *Module) requestEntry() {
 	select {
-	case request := <-module.RequestInputChannel:
+	case request := <-module.ApplicationRequests:
 		{
 			if request == ENTER {
-				module.lastRequestTimestamp++
-				module.lastRequestTimestamp = module.lastRequestTimestamp
+				module.localLogicalClock++
 
 				for _, address := range module.addresses {
-					module.sendToLink(address, requestEntry, " ")
+					module.sendRequestEntry(address)
 				}
 
-				module.mutexState = wantsMutualExclusion
+				module.state = wantsMutualExclusion
 			}
 		}
 	}
@@ -150,21 +165,21 @@ func (module *DistributedMutexModule) requestEntry() {
 	*/
 }
 
-func (module *DistributedMutexModule) requestExit() {
-	select {
-	case request := <-module.RequestInputChannel:
-		{
-			if request == EXIT {
-				module.mutexState = noMutualExclusion
-			}
+func (module *Module) requestExit() {
+	for index, address := range module.addresses {
+		if module.isAgentWaiting[index] {
+			module.sendResponseOk(address)
 		}
 	}
+
+	module.state = notInMutualExclusion
+	module.isAgentWaiting[module.id] = false
 	/*
 						upon event [ dmx, Exit  |  r  ]  do
-		       				para todo [p, r, ts ] em isWaitingFlags
+		       				para todo [p, r, ts ] em isAgentWaiting
 		          				trigger [ pl, Send | p , [ respOk, r ]  ]
 		    				estado := naoQueroSC
-							isWaitingFlags := {}
+							isAgentWaiting := {}
 	*/
 }
 
@@ -174,10 +189,11 @@ func (module *DistributedMutexModule) requestExit() {
 // ------- UPON reqEntry
 // ------------------------------------------------------------------------------------
 
-func (module *DistributedMutexModule) handleRequestOkFromOther(msgOutro PerfectP2PLink.InRequest) {
-	module.responseAmount++
-	if module.responseAmount == len(module.addresses) {
-		module.sendToLink()
+func (module *Module) handleRequestOkFromOther() {
+	module.responseOkAmount++
+	if module.responseOkAmount == uint(len(module.addresses)) {
+		module.AllowApplicationToAccess <- struct{}{}
+		module.state = inMutualExclusion
 	}
 	/*
 						upon event [ pl, Deliver | p, [ respOk, r ] ]
@@ -189,8 +205,11 @@ func (module *DistributedMutexModule) handleRequestOkFromOther(msgOutro PerfectP
 	*/
 }
 
-func (module *DistributedMutexModule) handleEntryRequestFromAnother(otherMessage PerfectP2PLink.InRequest) {
-	// outro processo quer entrar na SC
+func (module *Module) handleEntryRequestFromAnother(from PerfectP2PLink.Address, otherLogicalClock localTimestamp, otherId AgentId) {
+	if module.state == notInMutualExclusion || (module.state == wantsMutualExclusion && isBefore(otherId, otherLogicalClock, module.id, module.localLogicalClock)) {
+		module.sendResponseOk(from)
+	} else if module.state == inMutualExclusion || (module.state == wantsMutualExclusion && isBefore(module.id, module.localLogicalClock, otherId, otherLogicalClock)) {
+	}
 	/*
 						upon event [ pl, Deliver | p, [ reqEntry, r, rts ]  do
 		     				se (estado == naoQueroSC)   OR
@@ -208,24 +227,32 @@ func (module *DistributedMutexModule) handleEntryRequestFromAnother(otherMessage
 // ------- funcoes de ajuda
 // ------------------------------------------------------------------------------------
 
-func (module *DistributedMutexModule) sendToLink(address string, content string, space string) {
-	module.debugLog(space + " ---->>>>   to: " + address + "     msg: " + content)
+func (module *Module) sendToLink(address PerfectP2PLink.Address, content string, space string) {
+	module.debugLog(space + " ---->>>>   to: " + string(address) + "     msg: " + content)
 	module.PerfectP2PLink.OutputChannel <- PerfectP2PLink.OutRequest{
 		To:      address,
 		Message: content}
 }
 
-func before(oneId, oneTs, othId, othTs int) bool {
-	if oneTs < othTs {
-		return true
-	} else if oneTs > othTs {
-		return false
-	} else {
-		return oneId < othId
-	}
+func (module *Module) sendResponseOk(address PerfectP2PLink.Address) {
+	module.sendToLink(address, responseOk+" "+strconv.FormatUint(uint64(module.localLogicalClock), 10), " ")
 }
 
-func (module *DistributedMutexModule) debugLog(a ...any) {
+func (module *Module) sendRequestEntry(address PerfectP2PLink.Address) {
+	module.sendToLink(address, requestEntry+" "+strconv.FormatUint(uint64(module.localLogicalClock), 10), " ")
+}
+
+func isBefore(firstId AgentId, firstLogicalClock localTimestamp, otherId AgentId, otherLogicalClock localTimestamp) bool {
+	if firstLogicalClock < otherLogicalClock {
+		return true
+	} else if firstLogicalClock > otherLogicalClock {
+		return false
+	}
+
+	return firstId < otherId
+}
+
+func (module *Module) debugLog(a ...any) {
 	if module.isInDebugMode {
 		fmt.Println("[Mutex Debug]", a)
 	}

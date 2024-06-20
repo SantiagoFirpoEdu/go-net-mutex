@@ -59,10 +59,10 @@ package main
 //	for {
 //		// SOLICITA ACESSO AO DIMEX
 //		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
-//		distributedMutex.RequestInputChannel <- DistributedMutex.ENTER
+//		distributedMutex.ApplicationRequests <- DistributedMutex.ENTER
 //		//fmt.Println("[ APP id: ", id, " ESPERA MX ]")
 //		// ESPERA LIBERACAO DO MODULO DIMEX
-//		<-distributedMutex.AllowAccessChannel //
+//		<-distributedMutex.AllowApplicationToAccess //
 //
 //		// A PARTIR DAQUI ESTA ACESSANDO O ARQUIVO SOZINHO
 //		_, err = file.WriteString("|") // marca entrada no arquivo
@@ -80,7 +80,7 @@ package main
 //		}
 //
 //		// AGORA VAI LIBERAR O ARQUIVO PARA OUTROS
-//		distributedMutex.RequestInputChannel <- DistributedMutex.EXIT //
+//		distributedMutex.ApplicationRequests <- DistributedMutex.EXIT //
 //		fmt.Println("[ APP id: ", id, " FORA   MX ]")
 //	}
 //}

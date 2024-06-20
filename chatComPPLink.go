@@ -42,7 +42,7 @@ package main
 //			}
 //			req := PerfectP2PLink.RequestMessage{
 //				To:      addresses[1],
-//				Message: msg}
+//				Content: msg}
 //
 //			// for i := 1; i < 100; i++ {
 //			perfectP2PLink.RequestChannel <- req

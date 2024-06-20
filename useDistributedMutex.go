@@ -15,6 +15,7 @@ package main
 
 import (
 	"SD/DistributedMutex"
+	"SD/PerfectP2PLink"
 	"fmt"
 	"os"
 	"strconv"
@@ -32,20 +33,24 @@ func main() {
 	}
 
 	id, _ := strconv.Atoi(os.Args[1])
-	addresses := os.Args[2:]
+	addressesAsString := os.Args[2:]
+	addresses := make([]PerfectP2PLink.Address, len(addressesAsString))
+	for i, address : ra {
 
-	var distributedMutex = DistributedMutex.NewDistributedMutexModule(addresses, id, true)
+	}
+
+	var distributedMutex = DistributedMutex.NewDistributedMutexModule(addresses, DistributedMutex.AgentId(id), true)
 	fmt.Println(distributedMutex)
 
 	time.Sleep(5 * time.Second)
 
 	for {
 		fmt.Println("Application of id: ", id, " requests Mutex")
-		distributedMutex.RequestInputChannel <- DistributedMutex.ENTER
+		distributedMutex.ApplicationRequests <- DistributedMutex.ENTER
 		fmt.Println("Application of id: ", id, " waits for Mutex")
-		<-distributedMutex.AllowAccessChannel //
+		<-distributedMutex.AllowApplicationToAccess //
 		fmt.Println("Application of id: ", id, " has the mutex")
-		distributedMutex.RequestInputChannel <- DistributedMutex.EXIT //
+		distributedMutex.ApplicationRequests <- DistributedMutex.EXIT //
 		fmt.Println("Application of id: ", id, " leaves the mutex")
 	}
 }
