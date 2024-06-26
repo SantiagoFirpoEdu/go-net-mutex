@@ -44,12 +44,8 @@ func main() {
 	time.Sleep(5 * time.Second)
 
 	for {
-		fmt.Println("Application of id: ", id, " requests Mutex")
 		distributedMutex.ApplicationRequests() <- DistributedMutex.ENTER
-		fmt.Println("Application of id: ", id, " waits for Mutex")
 		<-distributedMutex.ApplicationIsFreeToAccess()
-		fmt.Println("Application of id: ", id, " has the mutex")
 		distributedMutex.ApplicationRequests() <- DistributedMutex.EXIT
-		fmt.Println("Application of id: ", id, " leaves the mutex")
 	}
 }

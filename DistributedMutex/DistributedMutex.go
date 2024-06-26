@@ -11,8 +11,8 @@
 	   Além de obviamente entender a estrutura ...
 	   Implementar o núcleo do algoritmo ja descrito, ou seja, o corpo das
 	   funcoes reativas a cada entrada possível:
-	   			requestEntry()  // recebe do nivel de cima (app)
-				requestExit()   // recebe do nivel de cima (app)
+	   			handleEntryRequestFromApplication()  // recebe do nivel de cima (app)
+				handleExitRequestedFromApplication()   // recebe do nivel de cima (app)
 				handleRequestOkFromOther(msgOutro)   // recebe do nivel de baixo
 				handleEntryRequestFromAnother(msgOutro) // recebe do nivel de baixo
 */
@@ -48,7 +48,7 @@ type localTimestamp uint64
 type AgentId uint64
 
 const (
-	notInMutualExclusion EState = iota
+	doesntWantMutualExclusion EState = iota
 	wantsMutualExclusion
 	inMutualExclusion
 )
@@ -72,8 +72,9 @@ type Module struct {
 	index                     AgentId
 	state                     EState
 	isAgentWaiting            []bool
+	localLogicalClock         localTimestamp
 	timestamp                 localTimestamp
-	responseOkAmount          uint
+	okResponseAmount          uint
 	isInDebugMode             bool
 
 	PerfectP2PLink *PerfectP2PLink.PerfectP2PLink
@@ -82,17 +83,17 @@ type Module struct {
 func NewDistributedMutexModule(addresses []PerfectP2PLink.Address, id AgentId, isDebug bool) *Module {
 
 	distributedMutexModule := &Module{
-		applicationRequests:       make(chan requestFromApplication, 1),
-		applicationIsFreeToAccess: make(chan allowAccessMessage, 1),
+		applicationRequests:       make(chan requestFromApplication),
+		applicationIsFreeToAccess: make(chan allowAccessMessage),
 		addressToIndex:            make(map[PerfectP2PLink.Address]AgentId),
 		addresses:                 addresses,
 		index:                     id,
-		state:                     notInMutualExclusion,
+		state:                     doesntWantMutualExclusion,
 		isAgentWaiting:            make([]bool, len(addresses)),
 		timestamp:                 0,
 		isInDebugMode:             isDebug,
 
-		PerfectP2PLink: PerfectP2PLink.NewLink(addresses[id], isDebug)}
+		PerfectP2PLink: PerfectP2PLink.NewLink(addresses[id], true)}
 
 	for i := AgentId(0); i < AgentId(len(distributedMutexModule.isAgentWaiting)); i++ {
 		distributedMutexModule.isAgentWaiting[i] = false
@@ -112,22 +113,29 @@ func (module *Module) Start() {
 			case applicationRequest := <-module.applicationRequests:
 				if applicationRequest == ENTER {
 					module.debugLog("App", module.index, "is requesting mutual exclusion")
-					module.requestEntry()
+					module.handleEntryRequestFromApplication()
 
 				} else if applicationRequest == EXIT {
+					module.okResponseAmount = 0
 					module.debugLog("App", module.index, "releases mutual exclusion")
-					module.requestExit()
+					module.handleExitRequestedFromApplication()
 				}
 
 			case messageFromAnotherModule := <-module.PerfectP2PLink.ReceiveChannel():
 				otherTimestamp := getTimestamp(messageFromAnotherModule)
-				if strings.Contains(messageFromAnotherModule.Content, responseOk) {
-					module.debugLog("Received message from the module", module.addressToIndex[messageFromAnotherModule.From], "with a ResponseOk:", messageFromAnotherModule.Content)
+				split := strings.Split(messageFromAnotherModule.Content, " ")
+				otherIdToken := split[2]
+				otherIdInt, _ := strconv.Atoi(otherIdToken)
+				otherId := AgentId(otherIdInt)
+				requestType := split[0]
+
+				if requestType == responseOk {
+					module.debugLog("Received message from the module", otherId, "with a ResponseOk. Timestamp is", otherTimestamp)
 					module.handleRequestOkFromOther()
 
-				} else if strings.Contains(messageFromAnotherModule.Content, requestEntry) {
-					module.debugLog("Received message from the module", module.addressToIndex[messageFromAnotherModule.From], "with a RequestEntry:", messageFromAnotherModule.Content)
-					module.handleEntryRequestFromAnother(messageFromAnotherModule.From, otherTimestamp, module.addressToIndex[messageFromAnotherModule.From]) // ENTRADA DO ALGORITMO
+				} else if requestType == requestEntry {
+					module.debugLog("Received message from the module", otherId, "with a RequestEntry. Timestamp is", otherTimestamp)
+					module.handleEntryRequestFromAnother(otherTimestamp, otherId)
 				}
 			}
 		}
@@ -145,12 +153,14 @@ func getTimestamp(message PerfectP2PLink.ReceivedRequest) localTimestamp {
 	return localTimestamp(atoi)
 }
 
-func (module *Module) requestEntry() {
-	module.timestamp++
+func (module *Module) handleEntryRequestFromApplication() {
+	module.localLogicalClock++
+	module.timestamp = module.localLogicalClock
+	module.okResponseAmount = 0
 
-	for index, address := range module.addresses {
+	for index := range module.addresses {
 		if module.index != AgentId(index) {
-			module.sendRequestEntry(address)
+			module.sendRequestEntry(AgentId(index))
 		}
 	}
 
@@ -165,15 +175,15 @@ func (module *Module) requestEntry() {
 	*/
 }
 
-func (module *Module) requestExit() {
-	for index, address := range module.addresses {
+func (module *Module) handleExitRequestedFromApplication() {
+	for index := range module.addresses {
 		if module.isAgentWaiting[index] {
-			module.sendOkResponse(address)
+			module.sendOkResponse(AgentId(index))
+			module.isAgentWaiting[index] = false
 		}
 	}
 
-	module.state = notInMutualExclusion
-	module.isAgentWaiting[module.index] = false
+	module.state = doesntWantMutualExclusion
 	/*
 						upon event [ dmx, Exit  |  r  ]  do
 		       				para todo [p, r, ts ] em isAgentWaiting
@@ -183,15 +193,9 @@ func (module *Module) requestExit() {
 	*/
 }
 
-// ------------------------------------------------------------------------------------
-// ------- tratamento de mensagens de outros processos
-// ------- UPON respOK
-// ------- UPON reqEntry
-// ------------------------------------------------------------------------------------
-
 func (module *Module) handleRequestOkFromOther() {
-	module.responseOkAmount++
-	if module.responseOkAmount == uint(len(module.addresses)) {
+	module.okResponseAmount++
+	if module.okResponseAmount == uint(len(module.addresses)-1) {
 		module.sendFreeToAccess()
 	}
 	/*
@@ -208,19 +212,18 @@ func (module *Module) sendFreeToAccess() {
 	module.state = inMutualExclusion
 }
 
-func (module *Module) handleEntryRequestFromAnother(from PerfectP2PLink.Address, otherTimestamp localTimestamp, otherId AgentId) {
-	isOtherBefore := isBefore(otherId, otherTimestamp, module.index, module.timestamp)
-	isOtherAfter := isBefore(module.index, module.timestamp, otherId, otherTimestamp)
+func (module *Module) handleEntryRequestFromAnother(otherTimestamp localTimestamp, otherId AgentId) {
+	isThisAfter := isAfter(module.index, module.timestamp, otherId, otherTimestamp)
 
-	shouldSendOkResponse := module.state == notInMutualExclusion || (module.state == wantsMutualExclusion && isOtherBefore)
-	shouldDelayResponse := module.state == inMutualExclusion || (module.state == wantsMutualExclusion && isOtherAfter)
+	shouldSendOkResponse := module.state == doesntWantMutualExclusion || (module.state == wantsMutualExclusion && isThisAfter)
 
 	if shouldSendOkResponse {
-		module.sendOkResponse(from)
-	} else if shouldDelayResponse {
-		module.isAgentWaiting[module.index] = true
-		module.timestamp = maxTimestamp(module.timestamp, otherTimestamp)
+		module.sendOkResponse(otherId)
+	} else {
+		module.isAgentWaiting[otherId] = true
 	}
+
+	module.localLogicalClock = maxTimestamp(module.localLogicalClock, otherTimestamp)
 	/*
 		se (estado == naoQueroSC)   OR
 			 (estado == QueroSC AND  myTs >  ts)
@@ -240,27 +243,27 @@ func maxTimestamp(first localTimestamp, second localTimestamp) localTimestamp {
 	return second
 }
 
-func (module *Module) sendToLink(address PerfectP2PLink.Address, content string) {
-	module.debugLog(module.index, "--> to module:", module.addressToIndex[address], ". message:", content)
+func (module *Module) sendToLink(otherId AgentId, content string) {
+	module.debugLog(module.index, "--> to module:", otherId, ". message:", content)
 	module.PerfectP2PLink.SendChannel() <- PerfectP2PLink.SentRequest{
-		To:      address,
+		To:      module.addresses[otherId],
 		Message: content}
 }
 
-func (module *Module) sendOkResponse(address PerfectP2PLink.Address) {
-	module.sendToLink(address, responseOk+" "+strconv.FormatUint(uint64(module.timestamp), 10))
+func (module *Module) sendOkResponse(otherId AgentId) {
+	module.sendToLink(otherId, responseOk+" "+strconv.FormatUint(uint64(module.timestamp), 10)+" "+strconv.FormatUint(uint64(module.index), 10))
 }
 
-func (module *Module) sendRequestEntry(address PerfectP2PLink.Address) {
-	module.sendToLink(address, requestEntry+" "+strconv.FormatUint(uint64(module.timestamp), 10))
+func (module *Module) sendRequestEntry(otherId AgentId) {
+	module.sendToLink(otherId, requestEntry+" "+strconv.FormatUint(uint64(module.timestamp), 10)+" "+strconv.FormatUint(uint64(module.index), 10))
 }
 
-func isBefore(firstId AgentId, firstTimestamp localTimestamp, otherId AgentId, otherTimestamp localTimestamp) bool {
+func isAfter(firstId AgentId, firstTimestamp localTimestamp, otherId AgentId, otherTimestamp localTimestamp) bool {
 	if firstTimestamp == otherTimestamp {
-		return firstId < otherId
+		return firstId > otherId
 	}
 
-	return firstTimestamp < otherTimestamp
+	return firstTimestamp > otherTimestamp
 }
 
 func (module *Module) ApplicationRequests() chan<- requestFromApplication {

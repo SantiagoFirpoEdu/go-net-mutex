@@ -87,6 +87,6 @@ func main() {
 		}
 
 		distributedMutex.ApplicationRequests() <- DistributedMutex.EXIT
-		fmt.Println("[ APP id: ", id, " FORA   MX ]")
+		fmt.Println("[App id: ", id, "is leaving the mutual exclusion]")
 	}
 }
