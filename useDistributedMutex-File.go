@@ -68,7 +68,6 @@ func main() {
 	time.Sleep(3 * time.Second)
 
 	for {
-		fmt.Println("[App id: ", id, " asking for mutual exclusion]")
 		distributedMutex.ApplicationRequests() <- DistributedMutex.ENTER
 		<-distributedMutex.ApplicationIsFreeToAccess()
 
@@ -77,8 +76,6 @@ func main() {
 			fmt.Println("Error writing to file:", err)
 			return
 		}
-
-		fmt.Println("[App id: ", id, " in mutual exclusion]")
 
 		_, err = file.WriteString(".")
 		if err != nil {
