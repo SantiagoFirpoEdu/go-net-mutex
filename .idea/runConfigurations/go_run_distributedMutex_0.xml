@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="go run distributedMutex 0" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <module name="go-net-mutex" />
+    <working_directory value="$PROJECT_DIR$" />
+    <parameters value="0 127.0.0.1:8000  127.0.0.1:8001  127.0.0.1:8002" />
+    <kind value="FILE" />
+    <package value="SD" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/useDistributedMutex.go" />
+    <method v="2" />
+  </configuration>
+</component>
