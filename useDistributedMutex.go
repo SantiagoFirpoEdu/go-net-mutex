@@ -40,17 +40,16 @@ func main() {
 	}
 
 	var distributedMutex = DistributedMutex.NewDistributedMutexModule(addresses, DistributedMutex.AgentId(id), true)
-	fmt.Println(distributedMutex)
 
 	time.Sleep(5 * time.Second)
 
 	for {
 		fmt.Println("Application of id: ", id, " requests Mutex")
-		distributedMutex.ApplicationRequests <- DistributedMutex.ENTER
+		distributedMutex.ApplicationRequests() <- DistributedMutex.ENTER
 		fmt.Println("Application of id: ", id, " waits for Mutex")
-		<-distributedMutex.AllowApplicationToAccess //
+		<-distributedMutex.ApplicationIsFreeToAccess()
 		fmt.Println("Application of id: ", id, " has the mutex")
-		distributedMutex.ApplicationRequests <- DistributedMutex.EXIT //
+		distributedMutex.ApplicationRequests() <- DistributedMutex.EXIT
 		fmt.Println("Application of id: ", id, " leaves the mutex")
 	}
 }
