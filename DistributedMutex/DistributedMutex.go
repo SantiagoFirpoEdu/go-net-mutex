@@ -145,12 +145,12 @@ func (module *Module) Start() {
 func getTimestamp(message PerfectP2PLink.ReceivedRequest) localTimestamp {
 	split := strings.Split(message.Content, " ")
 	timestamp := split[1]
-	atoi, err := strconv.Atoi(timestamp)
+	atoiTimestamp, err := strconv.Atoi(timestamp)
 	if err != nil {
 		panic("Unable to get localTimestamp from message")
 	}
 
-	return localTimestamp(atoi)
+	return localTimestamp(atoiTimestamp)
 }
 
 func (module *Module) handleEntryRequestFromApplication() {
