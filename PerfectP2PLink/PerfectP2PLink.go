@@ -72,7 +72,6 @@ func (module *PerfectP2PLink) debugLog(s string) {
 }
 
 func (module *PerfectP2PLink) Start(address Address) {
-
 	go func() {
 		listen, _ := net.Listen("tcp4", string(address))
 		for {
