@@ -12,4 +12,4 @@ Para ativar as mensagens de debug, basta habilitar as flags de isInDebugMode nas
 
 Após a implementação do trabalho, foi possível afirmar que a exclusão mútua é sempre garantida, visto que os padrões escritos no arquivo mxOUT.txt são sempre consistentes.
 
-A exclusão mútua é um algoritmo simples e confiável, que se torna mais complexo devido à necessidade de garantir a comunicação consistente entre os processos, com um formato de mensagem que ambos os processos entendem.
+A exclusão mútua é um algoritmo simples e confiável, que se torna mais complexo devido à necessidade de garantir a comunicação consistente entre os processos, com um formato de mensagem que ambos os processos entendem. Após a realização do trabalho, foi possível afirmar que a parte mais complexa foi a verificação da comunicação consistente entre os processos, assim como encontrar uma forma de realizar o debugging do sistema distribuído como um todo.
